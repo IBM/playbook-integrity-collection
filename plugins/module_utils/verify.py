@@ -1,6 +1,9 @@
 
 import os
 import subprocess
+import tempfile
+import gnupg
+from numpy import True_
 import ansible_collections.playbook.integrity.plugins.module_utils.common as common
 
 
@@ -38,10 +41,9 @@ class Verifier:
             result["verify_result"] = self.verify_sigstore(self.target, target_type=type, keyless=keyless)
         else:
             raise ValueError("this signature type is not supported: {}".format(self.signature_type))
-        if result["verify_result"]["returncode"] != 0:
+        # set overall result
+        if result["verify_result"].get("failed", True):
             result["failed"] = True
-            return result
-
         return result
 
     def verify_gpg(self, path, sigfile, msgfile, publickey=""):
@@ -51,17 +53,16 @@ class Verifier:
         if not os.path.exists(os.path.join(path, sigfile)):
             raise ValueError("signature file \"{}\" does not exists in path \"{}\"".format(sigfile, path))
         
-        gpghome_option = ""
-        keyring_option = ""
-        if publickey != "":
-            try:
-                os.makedirs(common.TMP_GNUPG_HOME_DIR)
-            except Exception:
-                pass
-            gpghome_option = "GNUPGHOME={}".format(common.TMP_GNUPG_HOME_DIR)
-            keyring_option = "--no-default-keyring --keyring {}".format(publickey)
-        cmd = "cd {}; {} gpg --verify {} {} {}".format(path, gpghome_option, keyring_option, sigfile, msgfile)
-        result = common.execute_command(cmd)
+        sigpath = os.path.join(path, sigfile)
+        msgpath = os.path.join(path, msgfile)
+        result = {}
+        with tempfile.TemporaryDirectory() as dname:
+            gpg = gnupg.GPG(gnupghome=dname, keyring=publickey)
+            verified = gpg.verify_file(file=sigpath, data_filename=msgpath)
+            if verified:
+                result["failed"] = False
+            else:
+                result["failed"] = True
         return result
 
     def verify_sigstore(self, target, target_type=common.SIGSTORE_TARGET_TYPE_FILE, keyless=False):

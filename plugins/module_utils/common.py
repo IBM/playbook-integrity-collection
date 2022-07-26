@@ -122,14 +122,15 @@ class Digester:
         return result
 
 def result_object_to_dict(obj):
-    if not isinstance(obj, subprocess.CompletedProcess):
-        return {}
-    
-    return dict(
-        returncode=obj.returncode,
-        stdout=obj.stdout,
-        stderr=obj.stderr,
-    )
+    if isinstance(obj, subprocess.CompletedProcess):
+        failed = (obj.returncode != 0)
+        return dict(
+            failed=failed,
+            returncode=obj.returncode,
+            stdout=obj.stdout,
+            stderr=obj.stderr,
+        )
+    return {}
 
 def execute_command(cmd="", env_params=None, timeout=None):
     env = None

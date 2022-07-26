@@ -1,5 +1,7 @@
 
 import os
+import tempfile
+import gnupg
 import ansible_collections.playbook.integrity.plugins.module_utils.common as common
 
 
@@ -41,21 +43,46 @@ class Signer:
             result["sign_result"] = self.sign_sigstore(self.target, target_type=type, keyless=keyless, filename=common.DIGEST_FILENAME)
         else:
             raise ValueError("this signature type is not supported: {}".format(self.signature_type))
-        if result["sign_result"]["returncode"] != 0:
+        # set overall result
+        if result["sign_result"].get("failed", True):
             result["failed"] = True
-            return result
-
         return result
 
     def sign_gpg(self, path, filename):
-        if self.private_key != "":
-            raise ValueError("using a specific private key is not supported yet")
+        if self.private_key == "":
+            raise ValueError("a private key must be specified fot GPG signing")
 
         if not os.path.exists(path):
             raise ValueError("the directory \"{}\" does not exists".format(path))
 
-        cmd = "cd {}; gpg --detach-sign {}".format(path, filename)
-        result = common.execute_command(cmd)
+        filepath = os.path.join(path, filename)
+        sigpath = os.path.join(path, common.SIGNATURE_FILENAME_GPG)
+        result = {}
+        with tempfile.TemporaryDirectory() as dname:
+            gpg = gnupg.GPG(gnupghome=dname)
+
+            # import the secret key to the temporary keyring
+            with open(self.private_key, "r") as private_key_file:
+                key_data = private_key_file.read()
+                import_result = gpg.import_keys(key_data)
+                if import_result.returncode != 0:
+                    result["failed"] = True
+                    result["returncode"] = import_result.returncode
+                    result["error"] = import_result.stderr
+                    return result 
+
+            # sign the message file
+            with open(filepath, "r") as file:
+                signed_data = gpg.sign_file(file=file, detach=True, output=sigpath)
+                if signed_data.returncode != 0:
+                    result["failed"] = True
+                    result["returncode"] = signed_data.returncode
+                    result["error"] = signed_data.stderr
+                    return result
+
+        result["failed"] = False
+        result["returncode"] = 0
+        result["error"] = ""
         return result
 
     def sign_sigstore(self, target, target_type=common.SIGSTORE_TARGET_TYPE_FILE, keyless=False, filename=common.DIGEST_FILENAME):
