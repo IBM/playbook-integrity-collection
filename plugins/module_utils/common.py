@@ -20,7 +20,6 @@ SIGNATURE_FILENAME_GPG = "sha256sum.txt.sig"
 SIGNATURE_FILENAME_SIGSTORE = "sha256sum.txt.sig"
 
 CHECKSUM_OK_IDENTIFIER = ": OK"
-TMP_GNUPG_HOME_DIR = "/tmp/gpghome"
 TMP_COSIGN_PATH = "/tmp/cosign"
 
 class Digester:
@@ -122,14 +121,15 @@ class Digester:
         return result
 
 def result_object_to_dict(obj):
-    if not isinstance(obj, subprocess.CompletedProcess):
-        return {}
-    
-    return dict(
-        returncode=obj.returncode,
-        stdout=obj.stdout,
-        stderr=obj.stderr,
-    )
+    if isinstance(obj, subprocess.CompletedProcess):
+        failed = (obj.returncode != 0)
+        return dict(
+            failed=failed,
+            returncode=obj.returncode,
+            stdout=obj.stdout,
+            stderr=obj.stderr,
+        )
+    return {}
 
 def execute_command(cmd="", env_params=None, timeout=None):
     env = None
@@ -175,3 +175,23 @@ def get_cosign_path():
         return TMP_COSIGN_PATH
     else:
         raise ValueError("failed to install cosign command; {}".format(result["stderr"]))
+
+def validate_path(pwd, fpath):
+    vaild_path = ""
+    if os.path.exists(fpath):
+        vaild_path = os.path.abspath(fpath)
+
+    if vaild_path == "" and fpath.startswith("~/"):
+        expanded_fpath = os.path.expanduser(fpath)
+        if os.path.exists(expanded_fpath):
+            vaild_path = expanded_fpath
+
+    if vaild_path == "":
+        joined_path = os.path.join(pwd, fpath)
+        if os.path.exists(joined_path):
+            vaild_path = joined_path
+
+    if vaild_path == "":
+        raise ValueError("file not found for the path \"{}\"".format(fpath))
+    
+    return vaild_path

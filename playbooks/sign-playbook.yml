@@ -5,6 +5,7 @@
   tasks:
   - name: Sign a playbook SCM repository
     playbook.integrity.sign:
+      pwd: "{{ lookup('env', 'PWD') }}"
       target: "{{ repo | default('<PATH/TO/REPO>') }}"
       signature_type: "{{ sigtype | default('gpg') }}"
       private_key: "{{ key | default('') }}"   # if empty, use gpg's default keyring

@@ -5,6 +5,7 @@
   tasks:
   - name: Verify a playbook SCM repository
     playbook.integrity.verify:
+      pwd: "{{ lookup('env', 'PWD') }}"
       target: "{{ repo | default('<PATH/TO/REPO>') }}"
       signature_type: "{{ sigtype | default('gpg') }}"
       public_key: "{{ key | default('') }}"   # if empty, use gpg's default keyring
