@@ -1,9 +1,10 @@
 
-from hmac import digest
 import os
 import platform
 import subprocess
-
+import git
+import hashlib
+import traceback
 
 TYPE_PLAYBOOK = "playbook"
 
@@ -33,46 +34,43 @@ class Digester:
     def get_scm_type(self, path):
         return SCM_TYPE_GIT
 
-    def gen(self, filename=DIGEST_FILENAME):
+    def gen(self, path="", filename=DIGEST_FILENAME):
+        if path == "":
+            path = self.path
         result = None
         if self.type == SCM_TYPE_GIT:
-            result = self.gen_git(filename=filename)
+            result = self.gen_git(path, filename)
         else:
             raise ValueError("this SCM type is not supported: {}".format(self.type))
         return result
     
-    def check(self):
-        result = self.filename_check()
+    def check(self, path=""):
+        if path == "":
+            path = self.path
+        result = self.filename_check(path)
         if result["returncode"] != 0:
             return result
-        result = self.digest_check()
+        result = self.digest_check(path)
         return result
 
-    def filename_check(self):
-        digest_file = os.path.join(self.path, DIGEST_FILENAME)
+    def filename_check(self, path):
+        digest_file = os.path.join(path, DIGEST_FILENAME)
         if not os.path.exists(digest_file):
-            return dict(
-                returncode=1,
-                stdout="",
-                stderr="No such file or directory: {}".format(digest_file)
-            )
-
-        tmp_digest_file = os.path.join("/tmp/", DIGEST_FILENAME)
-        result = self.gen(filename=tmp_digest_file)
-        if result["returncode"] != 0:
-            result["stderr"] = "failed to get the current file & digest list.\n\n{}".format(result["stderr"])
+            return {
+                "returncode": 1,
+                "stderr": "No such file or directory: {}".format(digest_file),
+            }
         signed_fnames = self.digest_file_to_filename_set(digest_file)
-        current_fnames = self.digest_file_to_filename_set(tmp_digest_file)
+        current_fname_list = self.list_files_git(path, DIGEST_FILENAME)
+        current_fnames = set(current_fname_list)
         if signed_fnames != current_fnames:
             added = current_fnames - signed_fnames if len(current_fnames - signed_fnames) > 0 else None
             removed = signed_fnames - current_fnames if len(signed_fnames - current_fnames) > 0 else None
-            result = dict(
-                returncode=1,
-                stdout="",
-                stderr="the following files are detected as differences.\nAdded: {}\nRemoved: {}".format(added, removed),
-            )
-            return result
-        return result
+            return {
+                "returncode": 1,
+                "stderr": "the following files are detected as differences.\nAdded: {}\nRemoved: {}".format(added, removed),
+            }
+        return {"returncode": 0, "stderr": ""}
 
     def digest_file_to_filename_set(self, filename):
         s = set()
@@ -85,40 +83,77 @@ class Digester:
             s.add(fname)
         return s
 
-    def digest_check(self):
-        tmp_check_out = "/tmp/digest_check_output.txt"
-        cmd = "cd {}; sha256sum --check {} > {} 2>&1".format(self.path, DIGEST_FILENAME, tmp_check_out)
-        result = execute_command(cmd)
-        if result["returncode"] != 0:
-            check_out_str = ""
-            with open(tmp_check_out, "r") as f:
-                check_out_str = f.read()
-            err_str = result["stderr"]
-            for line in check_out_str.splitlines():
-                if CHECKSUM_OK_IDENTIFIER in line:
+    def digest_check(self, path):
+        digest_file = os.path.join(path, DIGEST_FILENAME)
+        signed_digest_dict = {}
+        with open(digest_file, "r") as file:
+            for line in file:
+                parts = line.split(" ")
+                if len(parts) <= 1:
                     continue
-                err_str = "{}{}\n".format(err_str, line)
-            result["stderr"] = err_str
-        return result
+                digest = parts[0]
+                fname = " ".join(parts[1:]).replace("\n", "")
+                signed_digest_dict[fname] = digest
 
-    def gen_git(self, filename=DIGEST_FILENAME):
-        cmd1 = "cd {}; git ls-tree -r HEAD --name-only | grep -v {}".format(self.path, DIGEST_FILENAME)
-        result = execute_command(cmd1)
-        if result["returncode"] != 0:
-            return result
-        raw_fname_list = result["stdout"]
-        fname_list = ""
-        for line in raw_fname_list.splitlines():
-            fpath = os.path.join(self.path, line)
-            if os.path.islink(fpath):
+        filename_list = self.list_files_git(repo_path=path, ignore_prefix=DIGEST_FILENAME)
+        current_digest_list = self.calc_digest_for_fname_list(path, filename_list)
+        diff_found_files = []
+        for line in current_digest_list:
+            parts = line.split(" ")
+            if len(parts) <= 1:
                 continue
-            fname_list = "{}{}\n".format(fname_list, line)
-        tmp_fname_list_file = "/tmp/fname_list.txt"
-        with open(tmp_fname_list_file, "w") as f:
-            f.write(fname_list)
-        cmd2 = "cd {}; cat {} | xargs sha256sum > {}".format(self.path, tmp_fname_list_file, filename)
-        result = execute_command(cmd2)
-        return result
+            digest = parts[0]
+            fname = " ".join(parts[1:])
+            signed_digest = signed_digest_dict.get(fname, "__not_found__")
+            if digest != signed_digest:
+                diff_found_files.append(fname)
+        if len(diff_found_files) > 0:
+            err_msg = "checksum failed: the following files were changed from the signed state: {}".format(diff_found_files)
+            return {"returncode": 1, "stderr": err_msg}
+        return {"returncode": 0, "stderr": ""}
+
+    def gen_git(self, repo_path, filename=DIGEST_FILENAME):
+        filename_list = self.list_files_git(repo_path=repo_path, ignore_prefix=filename)
+        digest_list = self.calc_digest_for_fname_list(repo_path, filename_list)
+        try:
+            output_path = os.path.join(repo_path, filename)
+            with open(output_path, "w") as f:
+                f.write("\n".join(digest_list))
+        except:
+            return {"returncode": 1, "stderr": traceback.format_exc()}
+        
+        return {"returncode": 0}
+
+    def calc_digest_for_fname_list(self, path, fname_list):
+        digest_list = []
+        for fname in fname_list:
+            fpath = os.path.join(path, fname)
+            fdata = open(fpath, "r").read()
+            fdigest = hashlib.sha256(fdata.encode()).hexdigest()
+            digest_list.append("{} {}".format(fdigest, fname))
+        return digest_list
+
+    def list_files_git(self, repo_path, ignore_prefix=DIGEST_FILENAME):
+        repo = git.Repo(path=repo_path, search_parent_directories=True)
+        commit = repo.commit()
+        filename_list = []
+        stack = [commit.tree]
+        while len(stack) > 0:
+            tree = stack.pop()
+            for b in tree.blobs:
+                # skip symlink
+                if os.path.islink(b.path):
+                    continue
+                # skip digest file and signature file with ignore_prefix
+                if os.path.basename(b.path).startswith(ignore_prefix):
+                    continue
+                # otherwise add the file
+                filename_list.append(b.path)
+            for subtree in tree.trees:
+                stack.append(subtree)
+        # sort by filename (to be consistent with sha256sum command)
+        filename_list = sorted(filename_list)
+        return filename_list
 
 def result_object_to_dict(obj):
     if isinstance(obj, subprocess.CompletedProcess):

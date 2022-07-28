@@ -94,7 +94,8 @@ def run_module():
         target=dict(type='str', required=True),
         signature_type=dict(type='str', required=False, default="gpg"),
         private_key=dict(type='str', required=False, default=""),
-        public_key=dict(type='str', required=False, default=""),
+        keyid=dict(type='str', required=False, default=""),
+        passphrase=dict(type='str', required=False, default=""),
         keyless_signer_id=dict(type='str', required=False, default=""),
     )
 
