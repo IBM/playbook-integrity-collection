@@ -14,6 +14,8 @@ class Signer:
         self.private_key = params.get("private_key", "")
         if self.private_key != "":
             self.private_key = common.validate_path(self.pwd, self.private_key)
+        self.keyid = params.get("keyid", None)
+        self.passphrase = params.get("passphrase", None)
         self.keyless_signer_id = params.get("keyless_signer_id", "")
 
     def sign(self):
@@ -36,7 +38,7 @@ class Signer:
             sig_file = os.path.join(self.target, common.SIGNATURE_FILENAME_GPG)
             if os.path.exists(sig_file):
                 os.remove(sig_file) # remove privious signature before signing
-            result["sign_result"] = self.sign_gpg(self.target, common.DIGEST_FILENAME, common.SIGNATURE_FILENAME_GPG, self.private_key)
+            result["sign_result"] = self.sign_gpg(self.target, common.DIGEST_FILENAME, common.SIGNATURE_FILENAME_GPG, self.private_key, self.keyid, self.passphrase)
         elif self.signature_type in [common.SIGNATURE_TYPE_SIGSTORE, common.SIGNATURE_TYPE_SIGSTORE_KEYLESS]:
             keyless = True if self.signature_type == common.SIGNATURE_TYPE_SIGSTORE_KEYLESS else False
             type = common.SIGSTORE_TARGET_TYPE_FILE
@@ -48,7 +50,7 @@ class Signer:
             result["failed"] = True
         return result
 
-    def sign_gpg(self, path, msgfile, sigfile, private_key):
+    def sign_gpg(self, path, msgfile, sigfile, private_key, keyid=None, passphrase=None):
         use_gpg_default_key = False
         if private_key == "":
             use_gpg_default_key = True
@@ -61,7 +63,7 @@ class Signer:
         result = None
         if use_gpg_default_key:
             gpg = gnupg.GPG()
-            result = gpg.sign_file(file=open(msgpath, "rb"), detach=True, output=sigpath)
+            result = gpg.sign_file(file=open(msgpath, "rb"), detach=True, output=sigpath, keyid=keyid, passphrase=passphrase)
         else:
             # use a temp dir as gnupg home to disable default GPG keyrings
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -73,7 +75,7 @@ class Signer:
                         gpg.import_keys(open(private_key, "rb").read())
                     except:
                         raise
-                result = gpg.sign_file(file=open(msgpath, "rb"), detach=True, output=sigpath)
+                result = gpg.sign_file(file=open(msgpath, "rb"), detach=True, output=sigpath, passphrase=passphrase)
         failed = result.returncode != 0
         return {"failed": failed, "returncode": result.returncode, "stderr": result.stderr}
 

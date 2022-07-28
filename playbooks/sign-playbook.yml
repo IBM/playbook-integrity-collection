@@ -9,6 +9,8 @@
       target: "{{ repo | default('<PATH/TO/REPO>') }}"
       signature_type: "{{ sigtype | default('gpg') }}"
       private_key: "{{ key | default('') }}"   # if empty, use gpg's default keyring
+      keyid: "{{ keyid | default(omit) }}"  # gpg key id such as "Email" and "Real Name" in the key attributes
+      passphrase: "{{ passphrase | default(omit) }}"  # key passphrase
     register: result
     # ignore_errors: yes
 
