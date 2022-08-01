@@ -23,6 +23,8 @@ SIGNATURE_FILENAME_SIGSTORE = "sha256sum.txt.sig"
 CHECKSUM_OK_IDENTIFIER = ": OK"
 TMP_COSIGN_PATH = "/tmp/cosign"
 
+BLOCKSIZE = 65536
+
 class Digester:
     def __init__(self, path):
         self.path = path
@@ -128,8 +130,13 @@ class Digester:
         digest_list = []
         for fname in fname_list:
             fpath = os.path.join(path, fname)
-            fdata = open(fpath, "r").read()
-            fdigest = hashlib.sha256(fdata.encode()).hexdigest()
+            sha = hashlib.sha256()
+            with open(fpath, 'rb') as file:
+                file_buffer = file.read(BLOCKSIZE)
+                while len(file_buffer) > 0:
+                    sha.update(file_buffer)
+                    file_buffer = file.read(BLOCKSIZE)
+            fdigest = sha.hexdigest()
             digest_list.append("{} {}".format(fdigest, fname))
         return digest_list
 
