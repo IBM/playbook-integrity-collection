@@ -20,9 +20,6 @@ DIGEST_FILENAME = "sha256sum.txt"
 SIGNATURE_FILENAME_GPG = "sha256sum.txt.sig"
 SIGNATURE_FILENAME_SIGSTORE = "sha256sum.txt.sig"
 
-CHECKSUM_OK_IDENTIFIER = ": OK"
-TMP_COSIGN_PATH = "/tmp/cosign"
-
 BLOCKSIZE = 65536
 
 class Digester:
@@ -191,32 +188,8 @@ def get_cosign_path():
     result = execute_command(cmd1)
     if result["returncode"] == 0:
         return "cosign"
-
-    if os.path.exists(TMP_COSIGN_PATH):
-        return TMP_COSIGN_PATH
-
-    os_name = platform.system().lower()
-    machine = platform.uname().machine
-    arch = "unknown"
-    if machine == "x86_64":
-        arch = "amd64"
-    elif machine == "aarch64":
-        arch = "arm64"
-    elif machine == "ppc64le":
-        arch = "ppc64le"
-    elif machine == "s390x":
-        arch = "s390x"
     else:
-        arch = machine
-
-    cmd2 = "curl -sL -o {} https://github.com/sigstore/cosign/releases/download/v1.4.1/cosign-{}-{} && chmod +x {}".format(TMP_COSIGN_PATH, os_name, arch, TMP_COSIGN_PATH)
-    result = execute_command(cmd2)
-    if result["returncode"] == 0:
-        cmd3 = "{} initialize".format(TMP_COSIGN_PATH)
-        execute_command(cmd3)
-        return TMP_COSIGN_PATH
-    else:
-        raise ValueError("failed to install cosign command; {}".format(result["stderr"]))
+        raise ValueError("the command \"cosign\" not found: cosign is required when sigstore type is specified")
 
 def validate_path(pwd, fpath):
     vaild_path = ""
